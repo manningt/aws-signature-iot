@@ -1,7 +1,7 @@
 //
 //  shell-aws4-test.c
 //
-//  provides command line interface for aws-signing functions.
+//  provides a command line interface for aws-signing functions.
 //  The output is a valid curl command so it can be piped into a shell:  shell-aws4-test [arguments] | bash
 //
 //  Created by Tom Manning on 2017-01-23.
@@ -11,13 +11,15 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+#include <time.h>
 
 #include "sha256.h"
 #include "aws-signing.h"
 
+//#define DUMMY_TOD_FOR_AMZDATE 1
 
 int main( int argc, char **argv ) {
-    struct aws_signing_inputs inputs;
+    aws_signing_inputs inputs;
     init_inputs(&inputs);
     int c;
     
@@ -57,14 +59,28 @@ int main( int argc, char **argv ) {
     for (index = optind; index < argc; index++)
         printf ("Non-option argument %s\n", argv[index]);
 
-
-    struct aws_signing_outputs outputs;
+    char date_time_stamp[20];
+    time_t sig_time = time(0);
+    struct tm  *tstruct = gmtime(&sig_time);
+    #ifdef DUMMY_TOD_FOR_AMZDATE
+    strftime(date_time_stamp, sizeof(date_time_stamp), "%Y%m%dT12:34:56Z", tstruct);
+    #else
+    strftime(date_time_stamp, sizeof(date_time_stamp), "%Y%m%dT%H%M%SZ", tstruct);
+    #endif
+    inputs.date_time_stamp = date_time_stamp;
+    
+    aws_signing_outputs outputs;
     int rc = generate_aignature(&inputs, &outputs);
     
     switch (rc) {
         case 0:
             // output in curl format:
-            printf("curl -X %s -H \"%s\" -H \"%s\" ", inputs.method, outputs.date_header, outputs.auth_header);
+            printf("curl ");
+            //printf("--trace-ascii curl.out --trace-time ");
+            //printf("-v ");
+            if (strcmp(inputs.method, "GET") != 0)
+                printf("-X %s ", inputs.method);
+            printf("-H \"%s\" -H \"%s\" ", outputs.date_header, outputs.auth_header);
             if (inputs.payload != NULL) {
                 printf("--data \"");
                 //escape the quote characters
@@ -75,7 +91,7 @@ int main( int argc, char **argv ) {
                 }
                 printf("\" ");
             }
-            printf("%s\n", outputs.request_url);
+            printf("https://%s%s\n", outputs.aws_host, outputs.canonical_uri);
             break;
         case -1:
             printf("Error: missing endpoint_prefix (-e)\n");
